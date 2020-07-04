@@ -38,4 +38,50 @@ jobs:
       - name: Build and test
         run: |
             stack test --fast --test-arguments=--hide-successes
-  
+      - name: Compress binaries
+        id: compress_binaries
+        run: |
+            PACKAGE="haskell-dir-stat-exe"
+            BIN="$(stack path --local-install-root)/bin/$PACKAGE"
+
+            mkdir -p builds
+            cp "$BIN" "./$PACKAGE"
+            chmod +x "./$PACKAGE"
+
+            case "${{ matrix.os }}" in
+              ubuntu-latest)
+                COMPRESSED_BIN="dir-stat-${{ matrix.os }}.tar.gz"
+                echo ::set-output name=compressed_bin::$COMPRESSED_BIN
+                BIN_MIME="gzip"
+                echo ::set-output name=bin_mime::$BIN_MIME
+                tar czf "builds/$COMPRESSED_BIN" "$PACKAGE"
+                ;;
+              macOS-latest)
+                COMPRESSED_BIN="dir-stat-${{ matrix.os }}.zip"
+                echo ::set-output name=compressed_bin::$COMPRESSED_BIN
+                BIN_MIME="zip"
+                echo ::set-output name=bin_mime::$BIN_MIME
+                zip -r "builds/$COMPRESSED_BIN" "$PACKAGE"
+                ;;
+            esac
+      # FIXME: only one release should be created
+      - name: Create release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: testing release with github actions
+          draft: true
+      - name: Upload release assets
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./builds/${{ steps.compress_binaries.outputs.compressed_bin }}
+          asset_name: ${{ steps.compress_binaries.outputs.compressed_bin }}
+          asset_content_type: application/${{ steps.compress_binaries.outputs.bin_mime }}
+
+
