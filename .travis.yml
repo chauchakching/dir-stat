@@ -124,5 +124,5 @@ deploy:
   file_glob: true
   file: builds/*
   skip_cleanup: true
-  # on:
-  #   tags: true
+  on:
+    tags: true
