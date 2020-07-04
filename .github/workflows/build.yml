@@ -1,0 +1,41 @@
+name: CI tests
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macOS-latest]
+
+    steps:
+      - uses: actions/checkout@v2
+      # - name: Install Stack
+      #   run: |
+      #       curl -L https://get.haskellstack.org/stable/osx-x86_64.tar.gz -o stack.tar.gz
+      #       tar xzvf stack.tar.gz --strip-components=1 'stack*/stack'
+      - uses: actions/setup-haskell@v1.1
+        with:
+          ghc-version: latest
+      - name: Cache Stack global package db
+        id: stack-global
+        uses: actions/cache@v2
+        with:
+          path: ~/.stack
+          key: ${{ matrix.os }}-stack-global-${{ hashFiles('stack.yaml') }} 
+          restore-keys: |
+            ${{ matrix.os }}-stack-global-
+      - name: Install dependencies
+        run: |
+            stack update
+            stack test --dependencies-only --fast
+      - name: Build and test
+        run: |
+            stack test --fast --test-arguments=--hide-successes
+  
