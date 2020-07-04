@@ -1,0 +1,128 @@
+# This is the complex Travis configuration, which is intended for use
+# on open source libraries which need compatibility across multiple GHC
+# versions, must work with cabal-install, and should be
+# cross-platform. For more information and other options, see:
+#
+# https://docs.haskellstack.org/en/stable/travis_ci/
+#
+# Copy these contents into the root directory of your Github project in a file
+# named .travis.yml
+
+# Run jobs on Linux unless "os" is specified explicitly.
+os: linux
+
+# Do not choose a language; we provide our own build tools.
+language: generic
+
+# Caching so the next build will be fast too.
+cache:
+  directories:
+  - $HOME/.ghc
+  - $HOME/.cabal
+  - $HOME/.stack
+  - $TRAVIS_BUILD_DIR/.stack-work
+
+# The different configurations we want to test. We have BUILD=cabal which uses
+# cabal-install, and BUILD=stack which uses Stack. More documentation on each
+# of those below.
+#
+# We set the compiler values here to tell Travis to use a different
+# cache file per set of arguments.
+#
+# If you need to have different apt packages for each combination in the
+# job matrix, you can use a line such as:
+#     addons: {apt: {packages: [libfcgi-dev,libgmp-dev]}}
+jobs:
+  include:
+  # We grab the appropriate GHC and cabal-install versions from hvr's PPA. See:
+  # https://github.com/hvr/multi-ghc-travis
+  
+  # The Stack builds. We can pass in arbitrary Stack arguments via the ARGS
+  # variable, such as using --stack-yaml to point to a different file.
+  - env: BUILD=stack ARGS="" OS=linux
+    compiler: ": #stack default"
+    addons: {apt: {packages: [libgmp-dev]}}
+
+  # Build on macOS in addition to Linux
+  - env: BUILD=stack ARGS="" OS=osx
+    compiler: ": #stack default osx"
+    os: osx
+
+before_install:
+# Using compiler above sets CC to an invalid value, so unset it
+- unset CC
+
+# We want to always allow newer versions of packages when building on GHC HEAD
+- CABALARGS=""
+- if [ "x$GHCVER" = "xhead" ]; then CABALARGS=--allow-newer; fi
+
+# Download and unpack the stack executable
+- export PATH=/opt/ghc/$GHCVER/bin:/opt/cabal/$CABALVER/bin:$HOME/.local/bin:/opt/alex/$ALEXVER/bin:/opt/happy/$HAPPYVER/bin:$HOME/.cabal/bin:$PATH
+- mkdir -p ~/.local/bin
+- |
+  if [ `uname` = "Darwin" ]
+  then
+    travis_retry curl --insecure -L https://get.haskellstack.org/stable/osx-x86_64.tar.gz | tar xz --strip-components=1 --include '*/stack' -C ~/.local/bin
+  else
+    travis_retry curl -L https://get.haskellstack.org/stable/linux-x86_64.tar.gz | tar xz --wildcards --strip-components=1 -C ~/.local/bin '*/stack'
+  fi
+
+  # Use the more reliable S3 mirror of Hackage
+  mkdir -p $HOME/.cabal
+  echo 'remote-repo: hackage.haskell.org:http://hackage.fpcomplete.com/' > $HOME/.cabal/config
+  echo 'remote-repo-cache: $HOME/.cabal/packages' >> $HOME/.cabal/config
+
+
+install:
+- echo "$(ghc --version) [$(ghc --print-project-git-commit-id 2> /dev/null || echo '?')]"
+- if [ -f configure.ac ]; then autoreconf -i; fi
+- |
+  set -ex
+  # Add in extra-deps for older snapshots, as necessary
+  #
+  # This is disabled by default, as relying on the solver like this can
+  # make builds unreliable. Instead, if you have this situation, it's
+  # recommended that you maintain multiple stack-lts-X.yaml files.
+
+  #stack --no-terminal --install-ghc $ARGS test --bench --dry-run || ( \
+  #  stack --no-terminal $ARGS build cabal-install && \
+  #  stack --no-terminal $ARGS solver --update-config)
+
+  # Build the dependencies
+  stack --no-terminal --install-ghc $ARGS test --bench --only-dependencies
+
+  set +ex
+
+script:
+- |
+  set -ex
+  stack --no-terminal $ARGS test --bench --no-run-benchmarks --haddock --no-haddock-deps
+
+  PACKAGE="haskell-dir-stat-exe"
+  BIN="$(stack path --local-install-root)/bin/$PACKAGE"
+
+  mkdir -p builds
+  cp "$BIN" "./$PACKAGE"
+  chmod +x "./$PACKAGE"
+
+  case "$OS" in
+    linux)
+      tar czf builds/dir-stat.tar.gz "$PACKAGE"
+      ;;
+    osx)
+      zip -r builds/dir-stat.zip "$PACKAGE"
+      ;;
+  esac
+
+  ls -lh builds
+
+  set +ex
+
+deploy:
+  provider: releases
+  api_key: $GITHUB_TOKEN
+  file_glob: true
+  file: builds/*
+  skip_cleanup: true
+  # on:
+  #   tags: true
